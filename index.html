@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini Racer V3.4.12</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Press Start 2P', cursive; /* Retro game font */
+            background-color: #1A2B1A; /* Dark green background */
+            color: #9AE69A; /* Light green text */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden; /* Prevent scrollbars from game elements */
+        }
+        #gameCanvas {
+            background-color: #1E2A1E; /* Darker canvas background for contrast */
+            border: 5px solid #101A10; /* Darkest green border for canvas */
+            box-shadow: 0 0 30px #6F9F6F, 0 0 15px #8AE68A inset; /* Enhanced glow */
+            border-radius: 10px;
+        }
+        .ui-container {
+            display: flex;
+            justify-content: space-between;
+            width: 600px; /* Match canvas width */
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #2D4D2D;
+            border-radius: 8px;
+            border: 3px solid #5A8B5A;
+        }
+        .ui-text {
+            font-size: 20px;
+            color: #E0FFE0; /* Brighter green for UI text */
+            text-shadow: 0 0 5px #AFFF9A, 0 0 8px #7FAF7F; /* Enhanced Glowing effect */
+        }
+        #messageOverlay { 
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(20, 30, 20, 0.92); 
+            color: #E0FFE0;
+            padding: 30px;
+            border-radius: 10px;
+            border: 3px solid #B0FFB0; 
+            text-align: center;
+            font-size: 24px;
+            z-index: 100;
+            display: none; 
+            box-shadow: 0 0 25px #9AE69A;
+        }
+        .button-container {
+            margin-top: 20px;
+            display: flex;
+            gap: 15px;
+        }
+        .game-button {
+            background-color: #5A8B5A; 
+            color: #E0FFE0;
+            border: 2px solid #B0FFB0; 
+            padding: 10px 20px;
+            font-size: 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.3s, transform 0.1s;
+            box-shadow: 2px 2px #2D4D2D, 0 0 8px #9AE69A; 
+        }
+        .game-button:hover {
+            background-color: #7FAF7F; 
+            box-shadow: 2px 2px #1A2B1A, 0 0 12px #B0FFB0;
+        }
+        .game-button:active {
+            transform: translateY(2px);
+            box-shadow: 0 0 #2D4D2D, 0 0 8px #9AE69A;
+        }
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+    </style>
+</head>
+<body>
+    <div id="gameContainer" class="flex flex-col items-center">
+        <h1 class="text-4xl mb-4 text-[#C0FFC0] tracking-wider" style="font-family: 'Press Start 2P', cursive; text-shadow: 0 0 8px #9AE69A, 0 0 15px #6FAF6F;">Gemini Racer</h1>
+        <canvas id="gameCanvas" width="600" height="400"></canvas>
+        <div class="ui-container">
+            <div class="ui-text">SCORE: <span id="score">0</span></div>
+            <div class="ui-text">TIME: <span id="time">30</span></div>
+            <div class="ui-text">GEAR: <span id="gear">LOW</span></div>
+        </div>
+        <div class="button-container">
+            <button id="startButton" class="game-button">START GAME</button>
+            <button id="resetButton" class="game-button" style="display: none;">RESTART</button>
+        </div>
+    </div>
+
+    <div id="messageOverlay">
+        <p id="messageText"></p>
+        <button id="closeMessageButton" class="game-button mt-4" style="display:none;">OK</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        const scoreDisplay = document.getElementById('score');
+        const timeDisplay = document.getElementById('time');
+        const gearDisplay = document.getElementById('gear');
+        const startButton = document.getElementById('startButton');
+        const resetButton = document.getElementById('resetButton');
+
+        const messageOverlay = document.getElementById('messageOverlay');
+        const messageText = document.getElementById('messageText');
+        
+        const ROAD_WIDTH_RATIO = 0.6;
+        const LANE_MARKER_WIDTH = 5; 
+        const LANE_MARKER_HEIGHT = 40; 
+        const LANE_MARKER_GAP = 30;
+        const GRAVEL_SIZE = 3;
+        const TREE_WIDTH = 18;
+        const TREE_HEIGHT = 36;
+        const TIME_BONUS = 5; 
+        const TIME_EXTENSION_SCORE_THRESHOLD = 5000; 
+        const CRASH_PENALTY_SECONDS = 10;
+        const CRASH_RECOVERY_DELAY = 2000; 
+        const RESPAWN_CLEAR_RADIUS_X_FACTOR = 2.5; 
+        const RESPAWN_CLEAR_RADIUS_Y_FACTOR = 3.5; 
+        const MAX_OBSTACLE_CARS = 3; 
+        const GLOBAL_SCROLL_SPEED_FACTOR = 0.9; 
+        const MARKER_SCROLL_SENSITIVITY = 2.5; // New constant for marker scroll speed adjustment
+
+        let roadWidth = canvas.width * ROAD_WIDTH_RATIO;
+        let roadX = (canvas.width - roadWidth) / 2;
+
+        const MAX_SPEED_KMH = 300; 
+        const HIGH_GEAR_MAX_INTERNAL_SPEED = 10; 
+        const KMH_PER_INTERNAL_SPEED_UNIT = MAX_SPEED_KMH / HIGH_GEAR_MAX_INTERNAL_SPEED; 
+        const LOW_GEAR_INITIAL_ACCEL_END_KMH = 60;
+        const LOW_GEAR_INITIAL_ACCEL_END_INTERNAL = LOW_GEAR_INITIAL_ACCEL_END_KMH / KMH_PER_INTERNAL_SPEED_UNIT;
+        const LOW_GEAR_STRUGGLE_START_KMH = 100; 
+        const LOW_GEAR_STRUGGLE_START_INTERNAL = LOW_GEAR_STRUGGLE_START_KMH / KMH_PER_INTERNAL_SPEED_UNIT;
+        const LOW_GEAR_MAX_KMH_CAP = 120; 
+        const LOW_GEAR_MAX_INTERNAL_CAP = LOW_GEAR_MAX_KMH_CAP / KMH_PER_INTERNAL_SPEED_UNIT;
+        const HIGH_GEAR_OPTIMAL_ACCEL_START_KMH = 80; 
+        const HIGH_GEAR_OPTIMAL_ACCEL_START_INTERNAL = HIGH_GEAR_OPTIMAL_ACCEL_START_KMH / KMH_PER_INTERNAL_SPEED_UNIT;
+        const HIGH_GEAR_STRUGGLE_START_KMH = 250; 
+        const HIGH_GEAR_STRUGGLE_START_INTERNAL = HIGH_GEAR_STRUGGLE_START_KMH / KMH_PER_INTERNAL_SPEED_UNIT;
+        const ACCEL_LOW_INITIAL = 0.025; 
+        const ACCEL_LOW_MID = 0.012;     
+        const ACCEL_LOW_STRUGGLE = 0.004; 
+        const ACCEL_HIGH_POOR_BELOW_OPTIMAL = 0.002; 
+        const ACCEL_HIGH_OPTIMAL = 0.022;            
+        const ACCEL_HIGH_STRUGGLE = 0.005;           
+        const DECELERATION_NATURAL = 0.020; 
+        const ENGINE_BRAKING_TARGET_KMH = 100; 
+        const ENGINE_BRAKING_TARGET_INTERNAL = ENGINE_BRAKING_TARGET_KMH / KMH_PER_INTERNAL_SPEED_UNIT;
+        const ENGINE_BRAKING_DECELERATION = 0.15; 
+        const GRAVEL_MAX_SPEED_KMH = 10;
+        const GRAVEL_MAX_INTERNAL_SPEED = GRAVEL_MAX_SPEED_KMH / KMH_PER_INTERNAL_SPEED_UNIT;
+        const GRAVEL_DECELERATION = 0.1; 
+        const OBSTACLE_DRIFT_SPEED = 0.01; 
+
+        const COLOR_BACKGROUND_CTX = '#182818'; 
+        const COLOR_ROAD_CTX = '#203020';       
+        const COLOR_BRIGHT_LINE = '#C8FFC8';    
+        const COLOR_BRIGHTER_LINE = '#E0FFE0'; 
+        const COLOR_OBSTACLE_LINE_1 = '#A0D0A0';
+        const COLOR_OBSTACLE_LINE_2 = '#B0E0B0';
+        const COLOR_TREE_LINE = '#406040';      
+        const COLOR_GRAVEL_PARTICLE = '#608060';
+        const COLOR_PLAYER_FILL = '#5A8B5A'; 
+        const COLOR_OBSTACLE_FILL_1 = '#507B50';
+        const COLOR_OBSTACLE_FILL_2 = '#608B60';
+        const COLOR_SPEEDO_TEXT_GLOW = COLOR_BRIGHTER_LINE;
+        const COLOR_INFO_MESSAGE_GLOW = COLOR_BRIGHTER_LINE;
+        const COLOR_CRASH_MESSAGE_TEXT = '#FFA0A0'; 
+        const COLOR_GAMEOVER_TEXT_GLOW = '#FFC0C0';
+
+        const playerCar = {
+            width: 30, height: 50,
+            x: canvas.width / 2 - 15, y: canvas.height - 70,
+            speed: 0, kmh: 0,
+            turnSpeed: 4.5, gear: 'LOW', 
+            lineColor: COLOR_BRIGHT_LINE, 
+            fillColor: COLOR_PLAYER_FILL, 
+            isEngineBraking: false 
+        };
+
+        let score = 0;
+        let timeLeft = 30;
+        let gameRunning = false;
+        let gameOver = false;
+        let playerCrashed = false; 
+        let crashTime = 0;       
+        let keys = {};
+        let obstacleCars = [];
+        let sceneryObjects = [];
+        let onScreenMessages = [];
+        let lastTimeExtensionScore = 0;
+        let timerInterval;
+        let roadScrollAccumulatorY = 0; // For accumulating marker scroll
+
+        function initGame() {
+            playerCar.x = canvas.width / 2 - playerCar.width / 2;
+            playerCar.y = canvas.height - 70;
+            playerCar.speed = 0;
+            playerCar.kmh = 0;
+            playerCar.gear = 'LOW';
+            playerCar.isEngineBraking = false; 
+            gearDisplay.textContent = 'LOW';
+            score = 0;
+            timeLeft = 30;
+            gameRunning = true;
+            gameOver = false;
+            playerCrashed = false; 
+            obstacleCars = [];
+            sceneryObjects = [];
+            onScreenMessages = [];
+            lastTimeExtensionScore = 0; 
+            roadScrollAccumulatorY = 0; // Reset accumulator
+            scoreDisplay.textContent = score;
+            timeDisplay.textContent = timeLeft;
+            startButton.style.display = 'none';
+            resetButton.style.display = 'inline-block';
+            hideMessage('critical');
+            for (let i = 0; i < 25; i++) createRandomSceneryObject(true);
+            for (let i = 0; i < MAX_OBSTACLE_CARS -1 ; i++) { 
+                 spawnObstacleCar(true);
+            }
+            if (timerInterval) clearInterval(timerInterval);
+            timerInterval = setInterval(updateTimer, 1000);
+            canvas.style.backgroundColor = COLOR_BACKGROUND_CTX;
+            gameLoop();
+        }
+
+        function updateTimer() {
+            if (gameRunning && !gameOver && !playerCrashed) { 
+                timeLeft--;
+                timeDisplay.textContent = timeLeft;
+                if (timeLeft <= 0) {
+                    endGame("TIME'S UP!");
+                }
+            }
+        }
+
+        function gameLoop() {
+            if (gameOver) {
+                drawGameOver();
+                return;
+            }
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function update() {
+            if (gameOver) return; 
+            if (playerCrashed) {
+                if (Date.now() - crashTime > CRASH_RECOVERY_DELAY) {
+                    playerCrashed = false; 
+                    const respawnX = canvas.width / 2 - playerCar.width / 2;
+                    const respawnY = canvas.height - 70;
+                    playerCar.x = respawnX;
+                    playerCar.y = respawnY;
+                    playerCar.isEngineBraking = false; 
+                    const clearRadiusX = playerCar.width * RESPAWN_CLEAR_RADIUS_X_FACTOR; 
+                    const clearRadiusY = playerCar.height * RESPAWN_CLEAR_RADIUS_Y_FACTOR;
+                    obstacleCars = obstacleCars.filter(car => {
+                        const carCenterX = car.x + car.width / 2;
+                        const carCenterY = car.y + car.height / 2;
+                        const playerCenterX = respawnX + playerCar.width / 2;
+                        const playerCenterY = respawnY + playerCar.height / 2;
+                        const dx = Math.abs(carCenterX - playerCenterX);
+                        const dy = Math.abs(carCenterY - playerCenterY);
+                        return !(dx < clearRadiusX && dy < clearRadiusY);
+                    });
+                }
+            } else {
+                handlePlayerMovement();
+                updatePlayerSpeed(); 
+                
+                let visualScrollSpeed = playerCar.speed * GLOBAL_SCROLL_SPEED_FACTOR; 
+
+                // Update roadScrollAccumulatorY for markers
+                let markerScrollDelta = playerCar.speed * GLOBAL_SCROLL_SPEED_FACTOR;
+                if (playerCrashed || playerCar.isEngineBraking) { // This condition might be redundant if playerCrashed block is hit first
+                    markerScrollDelta *= 0.5;
+                }
+                roadScrollAccumulatorY += markerScrollDelta * MARKER_SCROLL_SENSITIVITY;
+
+
+                sceneryObjects.forEach(obj => {
+                    obj.y += visualScrollSpeed * (obj.type === 'gravel' ? 1.2 : 0.85); 
+                    if (obj.y > canvas.height) {
+                        sceneryObjects.splice(sceneryObjects.indexOf(obj), 1);
+                        createRandomSceneryObject();
+                    }
+                });
+                if (sceneryObjects.length < 40 && Math.random() < 0.6) {
+                    createRandomSceneryObject();
+                }
+
+                obstacleCars.forEach(car => {
+                    car.driftChangeCooldown--;
+                    if (car.driftChangeCooldown <= 0) {
+                        car.targetX = roadX + Math.random() * (roadWidth - car.width);
+                        car.targetX = Math.max(roadX, car.targetX);
+                        car.targetX = Math.min(roadX + roadWidth - car.width, car.targetX);
+                        car.driftChangeCooldown = 70 + Math.random() * 70; 
+                    }
+                    car.x += (car.targetX - car.x) * OBSTACLE_DRIFT_SPEED; 
+                    car.x = Math.max(roadX, Math.min(roadX + roadWidth - car.width, car.x)); 
+                    
+                    car.y += visualScrollSpeed * 0.9 - car.speedOffset * GLOBAL_SCROLL_SPEED_FACTOR; 
+                    if (car.y > canvas.height) {
+                        obstacleCars.splice(obstacleCars.indexOf(car), 1);
+                        spawnObstacleCar();
+                    }
+                });
+                if (Math.random() < 0.03 && obstacleCars.length < MAX_OBSTACLE_CARS && playerCar.speed > 0.5) { 
+                    spawnObstacleCar();
+                }
+
+                checkCollisions(); 
+
+                if (playerCar.speed > 0.2 && !playerCar.isEngineBraking) { 
+                    score += Math.floor(playerCar.kmh / 20); 
+                    scoreDisplay.textContent = score;
+                    if (score >= lastTimeExtensionScore + TIME_EXTENSION_SCORE_THRESHOLD) {
+                        timeLeft += TIME_BONUS; 
+                        timeDisplay.textContent = timeLeft;
+                        lastTimeExtensionScore += TIME_EXTENSION_SCORE_THRESHOLD;
+                        showMessage(`+${TIME_BONUS}s`, 2000, 'info'); 
+                    }
+                }
+            }
+        }
+        
+        function handleCrash() {
+            if (playerCrashed || gameOver) return; 
+            playerCrashed = true;
+            crashTime = Date.now();
+            playerCar.speed = 0; 
+            playerCar.kmh = 0;
+            playerCar.isEngineBraking = false; 
+            timeLeft -= CRASH_PENALTY_SECONDS;
+            timeDisplay.textContent = Math.max(0, timeLeft); 
+            if (timeLeft <= 0) {
+                showMessage("CRASH!", 1500, 'info', COLOR_CRASH_MESSAGE_TEXT); 
+                setTimeout(() => {
+                    endGame("CRASHED OUT!");
+                }, 1500); 
+            } else {
+                showMessage(`CRASH! -${CRASH_PENALTY_SECONDS}s`, CRASH_RECOVERY_DELAY, 'info', COLOR_CRASH_MESSAGE_TEXT);
+            }
+        }
+
+        function handlePlayerMovement() {
+            if (playerCar.isEngineBraking) return; 
+            if (keys['arrowleft']) {
+                playerCar.x -= playerCar.turnSpeed;
+            }
+            if (keys['arrowright']) {
+                playerCar.x += playerCar.turnSpeed;
+            }
+            if (playerCar.x < roadX) {
+                playerCar.x = roadX;
+            }
+            if (playerCar.x + playerCar.width > roadX + roadWidth) {
+                playerCar.x = roadX + roadWidth - playerCar.width;
+            }
+            if (playerCar.x < 0) playerCar.x = 0;
+            if (playerCar.x + playerCar.width > canvas.width) playerCar.x = canvas.width - playerCar.width;
+        }
+
+        function updatePlayerSpeed() {
+            if (playerCar.isEngineBraking) {
+                playerCar.speed -= ENGINE_BRAKING_DECELERATION;
+                if (playerCar.speed <= ENGINE_BRAKING_TARGET_INTERNAL) { 
+                    playerCar.speed = ENGINE_BRAKING_TARGET_INTERNAL; 
+                    playerCar.isEngineBraking = false;
+                }
+                if (playerCar.speed < 0) playerCar.speed = 0;
+                playerCar.kmh = Math.round(playerCar.speed * KMH_PER_INTERNAL_SPEED_UNIT);
+                if (playerCar.kmh < 0) playerCar.kmh = 0;
+                return; 
+            }
+            let accelerationRate = 0;
+            let maxInternalSpeedForCurrentGear = 0;
+            if (playerCar.gear === 'LOW') {
+                maxInternalSpeedForCurrentGear = LOW_GEAR_MAX_INTERNAL_CAP;
+                if (keys['z']) {
+                    if (playerCar.speed < LOW_GEAR_INITIAL_ACCEL_END_INTERNAL) {
+                        accelerationRate = ACCEL_LOW_INITIAL;
+                    } else if (playerCar.speed < LOW_GEAR_STRUGGLE_START_INTERNAL) {
+                        accelerationRate = ACCEL_LOW_MID;
+                    } else {
+                        accelerationRate = ACCEL_LOW_STRUGGLE;
+                    }
+                }
+            } else { 
+                maxInternalSpeedForCurrentGear = HIGH_GEAR_MAX_INTERNAL_SPEED;
+                if (keys['z']) {
+                    if (playerCar.speed < HIGH_GEAR_OPTIMAL_ACCEL_START_INTERNAL) { 
+                        accelerationRate = ACCEL_HIGH_POOR_BELOW_OPTIMAL; 
+                    } else if (playerCar.speed < HIGH_GEAR_STRUGGLE_START_INTERNAL) {
+                        accelerationRate = ACCEL_HIGH_OPTIMAL;
+                    } else {
+                        accelerationRate = ACCEL_HIGH_STRUGGLE;
+                    }
+                }
+            }
+            if (keys['z']) playerCar.speed += accelerationRate;
+            else playerCar.speed -= DECELERATION_NATURAL;
+            const carLeftEdge = playerCar.x;
+            const carRightEdge = playerCar.x + playerCar.width;
+            const roadLeftEdge = roadX; 
+            const roadRightEdge = roadX + roadWidth; 
+            const onGravel = carLeftEdge < roadLeftEdge || carRightEdge > roadRightEdge;
+            if (onGravel) {
+                if (playerCar.speed > GRAVEL_MAX_INTERNAL_SPEED) {
+                    playerCar.speed -= GRAVEL_DECELERATION; 
+                }
+                maxInternalSpeedForCurrentGear = Math.min(maxInternalSpeedForCurrentGear, GRAVEL_MAX_INTERNAL_SPEED);
+            }
+            if (playerCar.speed < 0) playerCar.speed = 0;
+            if (playerCar.speed > maxInternalSpeedForCurrentGear) {
+                 playerCar.speed = maxInternalSpeedForCurrentGear;
+            }
+            playerCar.kmh = Math.round(playerCar.speed * KMH_PER_INTERNAL_SPEED_UNIT);
+            if (playerCar.kmh > MAX_SPEED_KMH) playerCar.kmh = MAX_SPEED_KMH; 
+            if (playerCar.kmh < 0) playerCar.kmh = 0;
+        }
+
+        function toggleGear() {
+            if (!gameRunning || gameOver || playerCrashed) return;
+            const oldGear = playerCar.gear;
+            playerCar.gear = (playerCar.gear === 'LOW') ? 'HIGH' : 'LOW';
+            gearDisplay.textContent = playerCar.gear;
+            if (oldGear === 'HIGH' && playerCar.gear === 'LOW') { 
+                if (playerCar.speed > ENGINE_BRAKING_TARGET_INTERNAL) { 
+                    playerCar.isEngineBraking = true;
+                } else {
+                    playerCar.isEngineBraking = false; 
+                }
+            } else if (oldGear === 'LOW' && playerCar.gear === 'HIGH') { 
+                playerCar.isEngineBraking = false; 
+            }
+        }
+
+        function createRandomSceneryObject(initial = false) {
+            const type = Math.random() < 0.65 ? 'gravel' : 'tree';
+            let objX;
+            const side = Math.random() < 0.5 ? 'left' : 'right';
+            if (type === 'gravel') {
+                const gravelAreaWidth = roadX * 0.6;
+                if (side === 'left') objX = Math.random() * (roadX - GRAVEL_SIZE - gravelAreaWidth) + gravelAreaWidth * 0.4;
+                else objX = roadX + roadWidth + Math.random() * (roadX - GRAVEL_SIZE - gravelAreaWidth) + gravelAreaWidth*0.4;
+                sceneryObjects.push({ x: objX, y: initial ? Math.random() * canvas.height : -GRAVEL_SIZE * 2, type: 'gravel', color: COLOR_GRAVEL_PARTICLE });
+            } else {
+                const treeAreaWidth = roadX * 0.7;
+                if (side === 'left') objX = Math.random() * (roadX - TREE_WIDTH - treeAreaWidth * 0.3) + treeAreaWidth * 0.15;
+                else objX = roadX + roadWidth + Math.random() * (roadX - TREE_WIDTH - treeAreaWidth*0.3) + treeAreaWidth*0.15;
+                 sceneryObjects.push({ x: objX, y: initial ? Math.random() * canvas.height : -TREE_HEIGHT, type: 'tree', color: COLOR_TREE_LINE });
+            }
+        }
+
+        function spawnObstacleCar(initial = false) {
+            const carWidth = 30; const carHeight = 50;
+            const initialX = roadX + Math.random() * (roadWidth - carWidth); 
+            const type = Math.random() < 0.5 ? 1 : 2;
+            obstacleCars.push({
+                x: initialX, 
+                y: initial ? Math.random() * -canvas.height * 1.5 : -carHeight - Math.random() * 250,
+                width: carWidth, height: carHeight,
+                lineColor: type === 1 ? COLOR_OBSTACLE_LINE_1 : COLOR_OBSTACLE_LINE_2,
+                fillColor: type === 1 ? COLOR_OBSTACLE_FILL_1 : COLOR_OBSTACLE_FILL_2,
+                speedOffset: Math.random() * 1.8 + 0.6,
+                targetX: initialX,  
+                driftChangeCooldown: 60 + Math.random() * 60 
+            });
+        }
+
+        function checkCollisions() {
+            if (playerCrashed || gameOver) return;
+            obstacleCars.forEach(car => {
+                if (playerCar.x < car.x + car.width && playerCar.x + playerCar.width > car.x &&
+                    playerCar.y < car.y + car.height && playerCar.y + playerCar.height > car.y) {
+                    handleCrash(); 
+                }
+            });
+        }
+
+        function draw() {
+            ctx.fillStyle = COLOR_BACKGROUND_CTX;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = COLOR_ROAD_CTX; 
+            ctx.fillRect(roadX, 0, roadWidth, canvas.height);
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.fillStyle = COLOR_BRIGHT_LINE;
+            
+            // Corrected marker scroll logic
+            const cycleLength = LANE_MARKER_HEIGHT + LANE_MARKER_GAP;
+            const currentCycleOffset = roadScrollAccumulatorY % cycleLength;
+            
+            for (let y = currentCycleOffset - cycleLength; y < canvas.height; y += cycleLength) {
+                ctx.fillRect(roadX + roadWidth / 3 - LANE_MARKER_WIDTH / 2, y, LANE_MARKER_WIDTH, LANE_MARKER_HEIGHT);
+                ctx.fillRect(roadX + (roadWidth * 2) / 3 - LANE_MARKER_WIDTH / 2, y, LANE_MARKER_WIDTH, LANE_MARKER_HEIGHT);
+            }
+            ctx.fillRect(roadX - 3, 0, 3, canvas.height); 
+            ctx.fillRect(roadX + roadWidth, 0, 3, canvas.height); 
+            ctx.globalCompositeOperation = 'source-over';
+            sceneryObjects.forEach(obj => {
+                ctx.fillStyle = obj.color;
+                if (obj.type === 'gravel') {
+                    ctx.fillRect(obj.x, obj.y, GRAVEL_SIZE, GRAVEL_SIZE * 1.5);
+                } else { 
+                    ctx.strokeStyle = obj.color;
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(obj.x + TREE_WIDTH / 2, obj.y);
+                    ctx.lineTo(obj.x + TREE_WIDTH / 2, obj.y + TREE_HEIGHT); 
+                    ctx.moveTo(obj.x, obj.y + TREE_HEIGHT * 0.3);
+                    ctx.lineTo(obj.x + TREE_WIDTH, obj.y + TREE_HEIGHT * 0.3); 
+                    ctx.moveTo(obj.x + TREE_WIDTH * 0.2, obj.y + TREE_HEIGHT * 0.6);
+                    ctx.lineTo(obj.x + TREE_WIDTH * 0.8, obj.y + TREE_HEIGHT * 0.6); 
+                    ctx.stroke();
+                }
+            });
+            obstacleCars.forEach(car => {
+                ctx.fillStyle = car.fillColor;
+                ctx.fillRect(car.x, car.y, car.width, car.height);
+                ctx.globalCompositeOperation = 'lighter';
+                ctx.strokeStyle = car.lineColor;
+                ctx.lineWidth = 2;
+                ctx.strokeRect(car.x, car.y, car.width, car.height);
+                ctx.globalCompositeOperation = 'source-over';
+            });
+            if (!gameOver) { 
+                if (playerCrashed) {
+                    if (Math.floor((Date.now() - crashTime) / 150) % 2 === 0) {
+                        ctx.fillStyle = playerCar.fillColor;
+                        ctx.fillRect(playerCar.x, playerCar.y, playerCar.width, playerCar.height);
+                        ctx.globalCompositeOperation = 'lighter';
+                        ctx.strokeStyle = playerCar.lineColor;
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(playerCar.x, playerCar.y, playerCar.width, playerCar.height);
+                        ctx.fillStyle = "rgba(255, 100, 100, 0.3)"; 
+                        ctx.fillRect(playerCar.x, playerCar.y, playerCar.width, playerCar.height);
+                        ctx.globalCompositeOperation = 'source-over';
+                    }
+                } else {
+                    ctx.fillStyle = playerCar.fillColor;
+                    ctx.fillRect(playerCar.x, playerCar.y, playerCar.width, playerCar.height);
+                    ctx.globalCompositeOperation = 'lighter';
+                    ctx.strokeStyle = playerCar.lineColor;
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(playerCar.x, playerCar.y, playerCar.width, playerCar.height);
+                    if (playerCar.speed > 0.1 && !playerCar.isEngineBraking) { 
+                        ctx.fillStyle = COLOR_BRIGHTER_LINE; 
+                        ctx.shadowColor = COLOR_BRIGHTER_LINE; 
+                        ctx.shadowBlur = 10; 
+                        ctx.fillRect(playerCar.x + 5, playerCar.y - 3, 6, 3); 
+                        ctx.fillRect(playerCar.x + playerCar.width - 11, playerCar.y - 3, 6, 3);
+                        ctx.shadowBlur = 0; 
+                    }
+                    ctx.globalCompositeOperation = 'source-over';
+                }
+            }
+            const speedoX = 20, speedoY = 35; 
+            ctx.font = "18px 'Press Start 2P'"; ctx.textAlign = 'left';
+            ctx.globalCompositeOperation = 'lighter'; 
+            ctx.fillStyle = COLOR_SPEEDO_TEXT_GLOW;
+            ctx.shadowColor = COLOR_SPEEDO_TEXT_GLOW; 
+            ctx.shadowBlur = 6;
+            ctx.fillText(`${playerCar.kmh} km/h`, speedoX, speedoY);
+            ctx.shadowBlur = 0; 
+            ctx.globalCompositeOperation = 'source-over';
+            const messageStartX = canvas.width - 15, messageStartY = 35, messageLineHeight = 24; 
+            ctx.font = "14px 'Press Start 2P'"; ctx.textAlign = 'right';
+            let visibleMessages = 0;
+            for (let i = onScreenMessages.length - 1; i >= 0; i--) {
+                const msg = onScreenMessages[i];
+                if (Date.now() > msg.endTime && msg.text !== "CRASH!" && !msg.text.startsWith("CRASH! -")) { 
+                     if (Date.now() > msg.endTime) onScreenMessages.splice(i, 1);
+                } else {
+                    if (visibleMessages < 3) {
+                        ctx.globalCompositeOperation = 'lighter'; 
+                        ctx.fillStyle = msg.color === COLOR_CRASH_MESSAGE_TEXT ? msg.color : COLOR_INFO_MESSAGE_GLOW;
+                        ctx.shadowColor = msg.color === COLOR_CRASH_MESSAGE_TEXT ? msg.color : COLOR_INFO_MESSAGE_GLOW; 
+                        ctx.shadowBlur = 5;
+                        ctx.fillText(msg.text, messageStartX, messageStartY + visibleMessages * messageLineHeight);
+                        ctx.shadowBlur = 0; 
+                        ctx.globalCompositeOperation = 'source-over';
+                        visibleMessages++;
+                    }
+                }
+            }
+        }
+
+        function drawStartScreen() { 
+            ctx.fillStyle = COLOR_BACKGROUND_CTX;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = COLOR_ROAD_CTX; 
+            ctx.fillRect(roadX, 0, roadWidth, canvas.height);
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.fillStyle = COLOR_BRIGHT_LINE;
+            for (let y = 0; y < canvas.height; y += LANE_MARKER_HEIGHT + LANE_MARKER_GAP) {
+                ctx.fillRect(roadX + roadWidth / 3 - LANE_MARKER_WIDTH / 2, y, LANE_MARKER_WIDTH, LANE_MARKER_HEIGHT);
+                ctx.fillRect(roadX + (roadWidth * 2) / 3 - LANE_MARKER_WIDTH / 2, y, LANE_MARKER_WIDTH, LANE_MARKER_HEIGHT);
+            }
+            ctx.fillRect(roadX - 3, 0, 3, canvas.height); 
+            ctx.fillRect(roadX + roadWidth, 0, 3, canvas.height);
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.font = "24px 'Press Start 2P'"; 
+            ctx.textAlign = 'center'; 
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.fillStyle = COLOR_BRIGHTER_LINE; 
+            ctx.shadowColor = COLOR_BRIGHTER_LINE; 
+            ctx.shadowBlur = 8;
+            ctx.fillText("Gemini Racer", canvas.width / 2, canvas.height / 2 - 60); 
+            ctx.fillText("PRESS START", canvas.width / 2, canvas.height / 2 - 20);
+            ctx.shadowBlur = 0;
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.font = "14px 'Press Start 2P'"; 
+            ctx.fillStyle = COLOR_BRIGHT_LINE; 
+            ctx.fillText("Controls:", canvas.width / 2, canvas.height / 2 + 30);
+            ctx.fillText("Arrows: Steer", canvas.width / 2, canvas.height / 2 + 60);
+            ctx.fillText("Z: Accelerate", canvas.width / 2, canvas.height / 2 + 90);
+            ctx.fillText("X: Gear Shift", canvas.width / 2, canvas.height / 2 + 120);
+        }
+
+        function drawGameOver() { 
+            ctx.fillStyle = 'rgba(10, 20, 10, 0.75)'; 
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.font = "28px 'Press Start 2P'"; 
+            ctx.textAlign = 'center'; 
+            const gameOverReason = messageText.textContent || "GAME OVER"; 
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.fillStyle = COLOR_GAMEOVER_TEXT_GLOW; 
+            ctx.shadowColor = COLOR_GAMEOVER_TEXT_GLOW; 
+            ctx.shadowBlur = 10;
+            ctx.fillText(gameOverReason, canvas.width / 2, canvas.height / 2 - 40); 
+            ctx.font = "20px 'Press Start 2P'"; 
+            ctx.fillStyle = COLOR_BRIGHTER_LINE;
+            ctx.shadowColor = COLOR_BRIGHTER_LINE;
+            ctx.shadowBlur = 5; 
+            ctx.fillText("Final Score: " + score, canvas.width / 2, canvas.height / 2 + 10);
+            ctx.fillText("Press RESTART", canvas.width / 2, canvas.height / 2 + 50);
+            ctx.shadowBlur = 0;
+            ctx.globalCompositeOperation = 'source-over';
+        }
+
+        function endGame(reason) { 
+            if (gameOver) return; 
+            gameOver = true; 
+            gameRunning = false; 
+            playerCar.speed = 0; 
+            playerCar.kmh = 0;
+            if(timerInterval) clearInterval(timerInterval);
+            messageText.textContent = reason; 
+            messageOverlay.style.display = 'none'; 
+            resetButton.style.display = 'inline-block'; 
+            startButton.style.display = 'none';
+        }
+
+        function showMessage(text, duration = 2000, type = 'info', color) {
+            let messageColor;
+            if (type === 'info') {
+                messageColor = color || COLOR_INFO_MESSAGE_GLOW; 
+                onScreenMessages.unshift({ text: text, endTime: Date.now() + duration, color: messageColor });
+                if (onScreenMessages.length > 3) onScreenMessages.pop();
+            } else if (type === 'critical') { 
+                messageText.textContent = text;
+            }
+        }
+
+        function hideMessage(type = 'critical') { 
+            if (type === 'critical') {
+                messageOverlay.style.display = 'none';
+            }
+        }
+
+        window.addEventListener('keydown', (e) => { 
+            if (gameOver) return; const key = e.key.toLowerCase(); keys[key] = true; 
+            if (key === 'x') toggleGear();
+            if (["arrowup", "arrowdown", "arrowleft", "arrowright", " ", "z", "x"].includes(key)) e.preventDefault();
+        });
+        window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+
+        startButton.addEventListener('click', () => { if (!gameRunning && !gameOver) initGame(); });
+        resetButton.addEventListener('click', initGame ); 
+
+        window.onload = () => {
+            roadWidth = canvas.width * ROAD_WIDTH_RATIO;
+            roadX = (canvas.width - roadWidth) / 2;
+            drawStartScreen();
+        };
+    </script>
+</body>
+</html>
