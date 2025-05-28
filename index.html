@@ -120,7 +120,7 @@
         const messageText = document.getElementById('messageText');
         
         // Game constants
-        const ROAD_WIDTH_RATIO = 0.7; // Adjusted for narrower canvas, makes road slightly wider relative to canvas
+        const ROAD_WIDTH_RATIO = 0.7; 
         const LANE_MARKER_WIDTH = 5; 
         const LANE_MARKER_HEIGHT = 40; 
         const LANE_MARKER_GAP = 30;
@@ -137,11 +137,9 @@
         const GLOBAL_SCROLL_SPEED_FACTOR = 0.9; 
         const MARKER_SCROLL_SENSITIVITY = 2.5;
 
-        // Road dimensions - will be calculated in window.onload and initGame
         let roadWidth; 
         let roadX;
 
-        // Speed and Gear constants
         const MAX_SPEED_KMH = 300; 
         const HIGH_GEAR_MAX_INTERNAL_SPEED = 10; 
         const KMH_PER_INTERNAL_SPEED_UNIT = MAX_SPEED_KMH / HIGH_GEAR_MAX_INTERNAL_SPEED; 
@@ -168,9 +166,8 @@
         const GRAVEL_MAX_SPEED_KMH = 10;
         const GRAVEL_MAX_INTERNAL_SPEED = GRAVEL_MAX_SPEED_KMH / KMH_PER_INTERNAL_SPEED_UNIT;
         const GRAVEL_DECELERATION = 0.1; 
-        const OBSTACLE_DRIFT_SPEED = 0.01; 
+        const OBSTACLE_DRIFT_SPEED = 0.01; // Used for both game obstacles and demo cars
 
-        // Color constants
         const COLOR_BACKGROUND_CTX = '#182818'; 
         const COLOR_ROAD_CTX = '#203020';        
         const COLOR_BRIGHT_LINE = '#C8FFC8';     
@@ -187,20 +184,17 @@
         const COLOR_CRASH_MESSAGE_TEXT = '#FFA0A0'; 
         const COLOR_GAMEOVER_TEXT_GLOW = '#FFC0C0';
 
-        // Player car object
         const playerCar = {
             width: 30, height: 50,
-            x: 0, // Will be set in initGame
-            y: 0, // Will be set in initGame
+            x: 0, y: 0, 
             speed: 0, kmh: 0,
-            turnSpeed: 4.0, // Slightly reduced turn speed for narrower road
+            turnSpeed: 4.0, 
             gear: 'LOW', 
             lineColor: COLOR_BRIGHT_LINE, 
             fillColor: COLOR_PLAYER_FILL, 
             isEngineBraking: false 
         };
 
-        // Game state variables
         let score = 0;
         let timeLeft = 30;
         let gameRunning = false;
@@ -215,17 +209,133 @@
         let timerInterval;
         let roadScrollAccumulatorY = 0;
 
-        // Function to calculate road dimensions
+        let startScreenAnimationId = null;
+        let demoCars = [];
+        let gameOverReturnToStartTimerId = null;
+        const NUM_DEMO_CARS = 5; 
+
         function calculateRoadDimensions() {
             roadWidth = canvas.width * ROAD_WIDTH_RATIO;
             roadX = (canvas.width - roadWidth) / 2;
         }
 
-        // Initialize game
+        function initializeDemoCars() {
+            demoCars = [];
+            for (let i = 0; i < NUM_DEMO_CARS; i++) {
+                spawnDemoCar(true, Math.random() * canvas.height);
+            }
+        }
+        
+        function spawnDemoCar(initialPlacement = false, initialY = 0) {
+            const carWidth = 30; const carHeight = 50;
+            if (typeof roadX === 'undefined' || typeof roadWidth === 'undefined') {
+                calculateRoadDimensions(); 
+            }
+            const carX = roadX + Math.random() * (roadWidth - carWidth);
+            const carYPos = initialPlacement ? initialY : canvas.height + carHeight + Math.random() * 50; 
+            const type = Math.random() < 0.5 ? 1 : 2;
+            demoCars.push({
+                x: carX,
+                y: carYPos,
+                width: carWidth, height: carHeight,
+                lineColor: type === 1 ? COLOR_OBSTACLE_LINE_1 : COLOR_OBSTACLE_LINE_2,
+                fillColor: type === 1 ? COLOR_OBSTACLE_FILL_1 : COLOR_OBSTACLE_FILL_2,
+                speed: 2.5 + Math.random() * 2.0, // Increased speed for demo cars
+                targetX: carX, 
+                driftChangeCooldown: 70 + Math.random() * 70 
+            });
+        }
+
+        function drawRoadDecorations(isStatic = false) {
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.fillStyle = COLOR_BRIGHT_LINE;
+
+            if (isStatic || !gameRunning) { 
+                for (let y = 0; y < canvas.height; y += LANE_MARKER_HEIGHT + LANE_MARKER_GAP) {
+                    ctx.fillRect(roadX + roadWidth / 3 - LANE_MARKER_WIDTH / 2, y, LANE_MARKER_WIDTH, LANE_MARKER_HEIGHT);
+                    ctx.fillRect(roadX + (roadWidth * 2) / 3 - LANE_MARKER_WIDTH / 2, y, LANE_MARKER_WIDTH, LANE_MARKER_HEIGHT);
+                }
+            } else { 
+                const cycleLength = LANE_MARKER_HEIGHT + LANE_MARKER_GAP;
+                const currentCycleOffset = roadScrollAccumulatorY % cycleLength;
+                for (let y = currentCycleOffset - cycleLength; y < canvas.height; y += cycleLength) {
+                    ctx.fillRect(roadX + roadWidth / 3 - LANE_MARKER_WIDTH / 2, y, LANE_MARKER_WIDTH, LANE_MARKER_HEIGHT);
+                    ctx.fillRect(roadX + (roadWidth * 2) / 3 - LANE_MARKER_WIDTH / 2, y, LANE_MARKER_WIDTH, LANE_MARKER_HEIGHT);
+                }
+            }
+            ctx.fillRect(roadX - 3, 0, 3, canvas.height);
+            ctx.fillRect(roadX + roadWidth, 0, 3, canvas.height);
+            ctx.globalCompositeOperation = 'source-over';
+        }
+        
+        function drawStartScreenText() {
+            ctx.font = "20px 'Press Start 2P'"; 
+            ctx.textAlign = 'center'; 
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.fillStyle = COLOR_BRIGHTER_LINE; 
+            ctx.shadowColor = COLOR_BRIGHTER_LINE; 
+            ctx.shadowBlur = 8;
+            ctx.fillText("Gemini Racer", canvas.width / 2, canvas.height / 2 - 100); 
+            ctx.fillText("PRESS START", canvas.width / 2, canvas.height / 2 - 60); 
+            ctx.shadowBlur = 0;
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.font = "12px 'Press Start 2P'"; 
+            ctx.fillStyle = COLOR_BRIGHT_LINE; 
+            ctx.fillText("Controls:", canvas.width / 2, canvas.height / 2 + 0); 
+            ctx.fillText("Arrows: Steer", canvas.width / 2, canvas.height / 2 + 30); 
+            ctx.fillText("Z: Accelerate", canvas.width / 2, canvas.height / 2 + 60); 
+            ctx.fillText("X: Gear Shift", canvas.width / 2, canvas.height / 2 + 90); 
+        }
+
+        function startScreenDemoLoop() {
+            ctx.fillStyle = COLOR_BACKGROUND_CTX;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = COLOR_ROAD_CTX;
+            ctx.fillRect(roadX, 0, roadWidth, canvas.height);
+
+            drawRoadDecorations(true); 
+
+            demoCars.forEach((car, index) => {
+                car.y -= car.speed; 
+                if (car.y < -car.height) { 
+                    demoCars.splice(index, 1); 
+                    spawnDemoCar(false);       
+                }
+
+                car.driftChangeCooldown--;
+                if (car.driftChangeCooldown <= 0) {
+                    car.targetX = roadX + Math.random() * (roadWidth - car.width);
+                    car.targetX = Math.max(roadX, car.targetX);
+                    car.targetX = Math.min(roadX + roadWidth - car.width, car.targetX);
+                    car.driftChangeCooldown = 70 + Math.random() * 70; 
+                }
+                car.x += (car.targetX - car.x) * OBSTACLE_DRIFT_SPEED; 
+                car.x = Math.max(roadX, Math.min(roadX + roadWidth - car.width, car.x)); 
+
+                ctx.fillStyle = car.fillColor;
+                ctx.fillRect(car.x, car.y, car.width, car.height);
+                ctx.globalCompositeOperation = 'lighter';
+                ctx.strokeStyle = car.lineColor;
+                ctx.lineWidth = 2;
+                ctx.strokeRect(car.x, car.y, car.width, car.height);
+                ctx.globalCompositeOperation = 'source-over';
+            });
+
+            drawStartScreenText();
+            startScreenAnimationId = requestAnimationFrame(startScreenDemoLoop);
+        }
+
+
         function initGame() {
-            calculateRoadDimensions(); // Calculate road dimensions based on current canvas size
+            clearTimeout(gameOverReturnToStartTimerId); 
+            if (startScreenAnimationId) {
+                cancelAnimationFrame(startScreenAnimationId); 
+                startScreenAnimationId = null; 
+            }
+
+            calculateRoadDimensions(); 
             playerCar.x = canvas.width / 2 - playerCar.width / 2;
-            playerCar.y = canvas.height - 70; // Position player car near bottom
+            playerCar.y = canvas.height - 70; 
             playerCar.speed = 0;
             playerCar.kmh = 0;
             playerCar.gear = 'LOW';
@@ -246,18 +356,16 @@
             startButton.style.display = 'none';
             resetButton.style.display = 'inline-block';
             hideMessage('critical');
-            // Initial population of scenery and obstacles
             for (let i = 0; i < 25; i++) createRandomSceneryObject(true);
             for (let i = 0; i < MAX_OBSTACLE_CARS -1 ; i++) { 
                 spawnObstacleCar(true);
             }
             if (timerInterval) clearInterval(timerInterval);
             timerInterval = setInterval(updateTimer, 1000);
-            canvas.style.backgroundColor = COLOR_BACKGROUND_CTX; // Set canvas background for game start
-            gameLoop();
+            canvas.style.backgroundColor = COLOR_BACKGROUND_CTX; 
+            gameLoop(); 
         }
 
-        // Update game timer
         function updateTimer() {
             if (gameRunning && !gameOver && !playerCrashed) { 
                 timeLeft--;
@@ -268,22 +376,19 @@
             }
         }
 
-        // Main game loop
         function gameLoop() {
             if (gameOver) {
-                drawGameOver(); // Draw game over screen and stop
+                drawGameOver(); 
                 return;
             }
-            update(); // Update game state
-            draw();   // Draw game elements
-            requestAnimationFrame(gameLoop); // Request next frame
+            update(); 
+            draw();   
+            requestAnimationFrame(gameLoop); 
         }
 
-        // Update game state
         function update() {
             if (gameOver) return; 
             if (playerCrashed) {
-                // Handle crash recovery delay
                 if (Date.now() - crashTime > CRASH_RECOVERY_DELAY) {
                     playerCrashed = false; 
                     const respawnX = canvas.width / 2 - playerCar.width / 2;
@@ -291,7 +396,6 @@
                     playerCar.x = respawnX;
                     playerCar.y = respawnY;
                     playerCar.isEngineBraking = false; 
-                    // Clear obstacles near respawn point
                     const clearRadiusX = playerCar.width * RESPAWN_CLEAR_RADIUS_X_FACTOR; 
                     const clearRadiusY = playerCar.height * RESPAWN_CLEAR_RADIUS_Y_FACTOR;
                     obstacleCars = obstacleCars.filter(car => {
@@ -305,58 +409,51 @@
                     });
                 }
             } else {
-                // Normal game update
                 handlePlayerMovement();
                 updatePlayerSpeed(); 
                 
                 let visualScrollSpeed = playerCar.speed * GLOBAL_SCROLL_SPEED_FACTOR; 
 
-                // Update road marker scroll
                 let markerScrollDelta = playerCar.speed * GLOBAL_SCROLL_SPEED_FACTOR;
                 if (playerCar.isEngineBraking) { 
-                    markerScrollDelta *= 0.5; // Slower scroll during engine braking
+                    markerScrollDelta *= 0.5; 
                 }
                 roadScrollAccumulatorY += markerScrollDelta * MARKER_SCROLL_SENSITIVITY;
 
-                // Update scenery objects
                 sceneryObjects.forEach(obj => {
                     obj.y += visualScrollSpeed * (obj.type === 'gravel' ? 1.2 : 0.85); 
-                    if (obj.y > canvas.height) { // If object is off-screen
+                    if (obj.y > canvas.height) { 
                         sceneryObjects.splice(sceneryObjects.indexOf(obj), 1);
-                        createRandomSceneryObject(); // Create a new one
+                        createRandomSceneryObject(); 
                     }
                 });
-                // Spawn new scenery if needed
                 if (sceneryObjects.length < 40 && Math.random() < 0.6) {
                     createRandomSceneryObject();
                 }
 
-                // Update obstacle cars
                 obstacleCars.forEach(car => {
                     car.driftChangeCooldown--;
-                    if (car.driftChangeCooldown <= 0) { // Time to change drift target
+                    if (car.driftChangeCooldown <= 0) { 
                         car.targetX = roadX + Math.random() * (roadWidth - car.width);
-                        car.targetX = Math.max(roadX, car.targetX); // Clamp within road
+                        car.targetX = Math.max(roadX, car.targetX); 
                         car.targetX = Math.min(roadX + roadWidth - car.width, car.targetX);
                         car.driftChangeCooldown = 70 + Math.random() * 70; 
                     }
-                    car.x += (car.targetX - car.x) * OBSTACLE_DRIFT_SPEED; // Drift towards target
-                    car.x = Math.max(roadX, Math.min(roadX + roadWidth - car.width, car.x)); // Clamp
+                    car.x += (car.targetX - car.x) * OBSTACLE_DRIFT_SPEED; 
+                    car.x = Math.max(roadX, Math.min(roadX + roadWidth - car.width, car.x)); 
                     
                     car.y += visualScrollSpeed * 0.9 - car.speedOffset * GLOBAL_SCROLL_SPEED_FACTOR; 
-                    if (car.y > canvas.height) { // If car is off-screen
+                    if (car.y > canvas.height) { 
                         obstacleCars.splice(obstacleCars.indexOf(car), 1);
-                        spawnObstacleCar(); // Spawn a new one
+                        spawnObstacleCar(); 
                     }
                 });
-                // Spawn new obstacle cars if needed
                 if (Math.random() < 0.03 && obstacleCars.length < MAX_OBSTACLE_CARS && playerCar.speed > 0.5) { 
                     spawnObstacleCar();
                 }
 
-                checkCollisions(); // Check for collisions with obstacles
+                checkCollisions(); 
 
-                // Update score and time bonus
                 if (playerCar.speed > 0.2 && !playerCar.isEngineBraking) { 
                     score += Math.floor(playerCar.kmh / 20); 
                     scoreDisplay.textContent = score;
@@ -370,7 +467,6 @@
             }
         }
         
-        // Handle player crash
         function handleCrash() {
             if (playerCrashed || gameOver) return; 
             playerCrashed = true;
@@ -390,36 +486,32 @@
             }
         }
 
-        // Handle player movement based on key input
         function handlePlayerMovement() {
-            if (playerCar.isEngineBraking || playerCrashed) return; // No movement if braking or crashed
+            if (playerCar.isEngineBraking || playerCrashed) return; 
             if (keys['arrowleft']) {
                 playerCar.x -= playerCar.turnSpeed;
             }
             if (keys['arrowright']) {
                 playerCar.x += playerCar.turnSpeed;
             }
-            // Prevent player from going off the sides of the road (on-road collision)
             if (playerCar.x < roadX) {
                 playerCar.x = roadX;
             }
             if (playerCar.x + playerCar.width > roadX + roadWidth) {
                 playerCar.x = roadX + roadWidth - playerCar.width;
             }
-            // Prevent player from going off the canvas edges (absolute boundary)
             if (playerCar.x < 0) playerCar.x = 0;
             if (playerCar.x + playerCar.width > canvas.width) playerCar.x = canvas.width - playerCar.width;
         }
 
-        // Update player speed based on acceleration, gear, and conditions
         function updatePlayerSpeed() {
-            if (playerCrashed) return; // No speed update if crashed
+            if (playerCrashed) return; 
 
             if (playerCar.isEngineBraking) {
                 playerCar.speed -= ENGINE_BRAKING_DECELERATION;
                 if (playerCar.speed <= ENGINE_BRAKING_TARGET_INTERNAL) { 
                     playerCar.speed = ENGINE_BRAKING_TARGET_INTERNAL; 
-                    playerCar.isEngineBraking = false; // Stop engine braking once target speed is reached
+                    playerCar.isEngineBraking = false; 
                 }
                 if (playerCar.speed < 0) playerCar.speed = 0;
                 playerCar.kmh = Math.round(playerCar.speed * KMH_PER_INTERNAL_SPEED_UNIT);
@@ -432,7 +524,7 @@
 
             if (playerCar.gear === 'LOW') {
                 maxInternalSpeedForCurrentGear = LOW_GEAR_MAX_INTERNAL_CAP;
-                if (keys['z']) { // Accelerating in LOW gear
+                if (keys['z']) { 
                     if (playerCar.speed < LOW_GEAR_INITIAL_ACCEL_END_INTERNAL) {
                         accelerationRate = ACCEL_LOW_INITIAL;
                     } else if (playerCar.speed < LOW_GEAR_STRUGGLE_START_INTERNAL) {
@@ -441,9 +533,9 @@
                         accelerationRate = ACCEL_LOW_STRUGGLE;
                     }
                 }
-            } else { // HIGH gear
+            } else { 
                 maxInternalSpeedForCurrentGear = HIGH_GEAR_MAX_INTERNAL_SPEED;
-                if (keys['z']) { // Accelerating in HIGH gear
+                if (keys['z']) { 
                     if (playerCar.speed < HIGH_GEAR_OPTIMAL_ACCEL_START_INTERNAL) { 
                         accelerationRate = ACCEL_HIGH_POOR_BELOW_OPTIMAL; 
                     } else if (playerCar.speed < HIGH_GEAR_STRUGGLE_START_INTERNAL) {
@@ -454,10 +546,9 @@
                 }
             }
 
-            if (keys['z']) playerCar.speed += accelerationRate; // Apply acceleration
-            else playerCar.speed -= DECELERATION_NATURAL; // Natural deceleration if not accelerating
+            if (keys['z']) playerCar.speed += accelerationRate; 
+            else playerCar.speed -= DECELERATION_NATURAL; 
 
-            // Gravel effect
             const carLeftEdge = playerCar.x;
             const carRightEdge = playerCar.x + playerCar.width;
             const roadLeftEdge = roadX; 
@@ -466,31 +557,27 @@
 
             if (onGravel) {
                 if (playerCar.speed > GRAVEL_MAX_INTERNAL_SPEED) {
-                    playerCar.speed -= GRAVEL_DECELERATION; // Slow down on gravel
+                    playerCar.speed -= GRAVEL_DECELERATION; 
                 }
-                // Cap speed on gravel, but allow acceleration up to this cap
                 maxInternalSpeedForCurrentGear = Math.min(maxInternalSpeedForCurrentGear, GRAVEL_MAX_INTERNAL_SPEED);
             }
             
-            if (playerCar.speed < 0) playerCar.speed = 0; // Speed cannot be negative
-            // Cap speed by current gear's max speed (or gravel max speed)
+            if (playerCar.speed < 0) playerCar.speed = 0; 
             if (playerCar.speed > maxInternalSpeedForCurrentGear) {
                  playerCar.speed = maxInternalSpeedForCurrentGear;
             }
 
             playerCar.kmh = Math.round(playerCar.speed * KMH_PER_INTERNAL_SPEED_UNIT);
-            if (playerCar.kmh > MAX_SPEED_KMH) playerCar.kmh = MAX_SPEED_KMH; // Absolute max speed
-            if (playerCar.kmh < 0) playerCar.kmh = 0; // KMH cannot be negative
+            if (playerCar.kmh > MAX_SPEED_KMH) playerCar.kmh = MAX_SPEED_KMH; 
+            if (playerCar.kmh < 0) playerCar.kmh = 0; 
         }
 
-        // Toggle player car gear
         function toggleGear() {
             if (!gameRunning || gameOver || playerCrashed) return;
             const oldGear = playerCar.gear;
             playerCar.gear = (playerCar.gear === 'LOW') ? 'HIGH' : 'LOW';
             gearDisplay.textContent = playerCar.gear;
 
-            // Handle engine braking when shifting from HIGH to LOW
             if (oldGear === 'HIGH' && playerCar.gear === 'LOW') { 
                 if (playerCar.speed > ENGINE_BRAKING_TARGET_INTERNAL) { 
                     playerCar.isEngineBraking = true;
@@ -498,34 +585,31 @@
                     playerCar.isEngineBraking = false; 
                 }
             } else if (oldGear === 'LOW' && playerCar.gear === 'HIGH') { 
-                playerCar.isEngineBraking = false; // Cancel engine braking if shifting to HIGH
+                playerCar.isEngineBraking = false; 
             }
         }
 
-        // Create a random scenery object (tree or gravel)
         function createRandomSceneryObject(initial = false) {
             const type = Math.random() < 0.65 ? 'gravel' : 'tree';
             let objX;
-            const side = Math.random() < 0.5 ? 'left' : 'right'; // Which side of the road
+            const side = Math.random() < 0.5 ? 'left' : 'right'; 
 
-            // Calculate position based on type and side
-            // Ensure objects are off the road
             if (type === 'gravel') {
-                const gravelAreaWidth = roadX * 0.6; // Width of the area where gravel can spawn
-                if (side === 'left') objX = Math.random() * (roadX - GRAVEL_SIZE - gravelAreaWidth * 0.2) + gravelAreaWidth * 0.1; // Adjusted for narrower screen
+                const gravelAreaWidth = roadX * 0.6; 
+                if (side === 'left') objX = Math.random() * (roadX - GRAVEL_SIZE - gravelAreaWidth * 0.2) + gravelAreaWidth * 0.1; 
                 else objX = roadX + roadWidth + Math.random() * (roadX - GRAVEL_SIZE - gravelAreaWidth*0.2) + gravelAreaWidth*0.1;
                 sceneryObjects.push({ 
-                    x: Math.max(0, Math.min(canvas.width - GRAVEL_SIZE, objX)), // Clamp to canvas
+                    x: Math.max(0, Math.min(canvas.width - GRAVEL_SIZE, objX)), 
                     y: initial ? Math.random() * canvas.height : -GRAVEL_SIZE * 2, 
                     type: 'gravel', 
                     color: COLOR_GRAVEL_PARTICLE 
                 });
-            } else { // Tree
+            } else { 
                 const treeAreaWidth = roadX * 0.7;
-                if (side === 'left') objX = Math.random() * (roadX - TREE_WIDTH - treeAreaWidth * 0.1) + treeAreaWidth * 0.05; // Adjusted
+                if (side === 'left') objX = Math.random() * (roadX - TREE_WIDTH - treeAreaWidth * 0.1) + treeAreaWidth * 0.05; 
                 else objX = roadX + roadWidth + Math.random() * (roadX - TREE_WIDTH - treeAreaWidth*0.1) + treeAreaWidth*0.05;
                  sceneryObjects.push({ 
-                    x: Math.max(0, Math.min(canvas.width - TREE_WIDTH, objX)), // Clamp to canvas
+                    x: Math.max(0, Math.min(canvas.width - TREE_WIDTH, objX)), 
                     y: initial ? Math.random() * canvas.height : -TREE_HEIGHT, 
                     type: 'tree', 
                     color: COLOR_TREE_LINE 
@@ -533,28 +617,25 @@
             }
         }
 
-        // Spawn an obstacle car
         function spawnObstacleCar(initial = false) {
             const carWidth = 30; const carHeight = 50;
-            const initialX = roadX + Math.random() * (roadWidth - carWidth); // Spawn within road limits
-            const type = Math.random() < 0.5 ? 1 : 2; // Two types of obstacle cars for variety
+            const initialX = roadX + Math.random() * (roadWidth - carWidth); 
+            const type = Math.random() < 0.5 ? 1 : 2; 
             obstacleCars.push({
                 x: initialX, 
-                y: initial ? Math.random() * -canvas.height * 0.8 : -carHeight - Math.random() * canvas.height * 0.5, // Adjusted initial Y
+                y: initial ? Math.random() * -canvas.height * 0.8 : -carHeight - Math.random() * canvas.height * 0.5, 
                 width: carWidth, height: carHeight,
                 lineColor: type === 1 ? COLOR_OBSTACLE_LINE_1 : COLOR_OBSTACLE_LINE_2,
                 fillColor: type === 1 ? COLOR_OBSTACLE_FILL_1 : COLOR_OBSTACLE_FILL_2,
-                speedOffset: Math.random() * 1.8 + 0.6, // Slight speed variation for obstacles
-                targetX: initialX,  // Initial drift target
-                driftChangeCooldown: 60 + Math.random() * 60 // Time until next drift change
+                speedOffset: Math.random() * 1.8 + 0.6, 
+                targetX: initialX,  
+                driftChangeCooldown: 60 + Math.random() * 60 
             });
         }
 
-        // Check for collisions between player and obstacle cars
         function checkCollisions() {
             if (playerCrashed || gameOver) return;
             obstacleCars.forEach(car => {
-                // Simple AABB collision detection
                 if (playerCar.x < car.x + car.width && playerCar.x + playerCar.width > car.x &&
                     playerCar.y < car.y + car.height && playerCar.y + playerCar.height > car.y) {
                     handleCrash(); 
@@ -562,69 +643,47 @@
             });
         }
 
-        // Draw all game elements on the canvas
         function draw() {
-            // Clear canvas
             ctx.fillStyle = COLOR_BACKGROUND_CTX;
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // Draw road
             ctx.fillStyle = COLOR_ROAD_CTX; 
             ctx.fillRect(roadX, 0, roadWidth, canvas.height);
             
-            // Set composite operation for glow effects
-            ctx.globalCompositeOperation = 'lighter';
-            ctx.fillStyle = COLOR_BRIGHT_LINE;
+            drawRoadDecorations(); 
             
-            // Draw lane markers with scrolling effect
-            const cycleLength = LANE_MARKER_HEIGHT + LANE_MARKER_GAP;
-            const currentCycleOffset = roadScrollAccumulatorY % cycleLength;
-            
-            for (let y = currentCycleOffset - cycleLength; y < canvas.height; y += cycleLength) {
-                ctx.fillRect(roadX + roadWidth / 3 - LANE_MARKER_WIDTH / 2, y, LANE_MARKER_WIDTH, LANE_MARKER_HEIGHT);
-                ctx.fillRect(roadX + (roadWidth * 2) / 3 - LANE_MARKER_WIDTH / 2, y, LANE_MARKER_WIDTH, LANE_MARKER_HEIGHT);
-            }
-            // Draw road edge lines
-            ctx.fillRect(roadX - 3, 0, 3, canvas.height); 
-            ctx.fillRect(roadX + roadWidth, 0, 3, canvas.height); 
-            
-            // Reset composite operation
-            ctx.globalCompositeOperation = 'source-over';
+            ctx.globalCompositeOperation = 'source-over'; 
 
-            // Draw scenery objects
             sceneryObjects.forEach(obj => {
                 ctx.fillStyle = obj.color;
                 if (obj.type === 'gravel') {
                     ctx.fillRect(obj.x, obj.y, GRAVEL_SIZE, GRAVEL_SIZE * 1.5);
-                } else { // Tree (simple representation)
+                } else { 
                     ctx.strokeStyle = obj.color;
                     ctx.lineWidth = 2;
                     ctx.beginPath();
-                    ctx.moveTo(obj.x + TREE_WIDTH / 2, obj.y); // Trunk
+                    ctx.moveTo(obj.x + TREE_WIDTH / 2, obj.y); 
                     ctx.lineTo(obj.x + TREE_WIDTH / 2, obj.y + TREE_HEIGHT); 
-                    ctx.moveTo(obj.x, obj.y + TREE_HEIGHT * 0.3); // Branch 1
+                    ctx.moveTo(obj.x, obj.y + TREE_HEIGHT * 0.3); 
                     ctx.lineTo(obj.x + TREE_WIDTH, obj.y + TREE_HEIGHT * 0.3); 
-                    ctx.moveTo(obj.x + TREE_WIDTH * 0.2, obj.y + TREE_HEIGHT * 0.6); // Branch 2
+                    ctx.moveTo(obj.x + TREE_WIDTH * 0.2, obj.y + TREE_HEIGHT * 0.6); 
                     ctx.lineTo(obj.x + TREE_WIDTH * 0.8, obj.y + TREE_HEIGHT * 0.6); 
                     ctx.stroke();
                 }
             });
 
-            // Draw obstacle cars
             obstacleCars.forEach(car => {
                 ctx.fillStyle = car.fillColor;
                 ctx.fillRect(car.x, car.y, car.width, car.height);
-                ctx.globalCompositeOperation = 'lighter'; // For line glow
+                ctx.globalCompositeOperation = 'lighter'; 
                 ctx.strokeStyle = car.lineColor;
                 ctx.lineWidth = 2;
                 ctx.strokeRect(car.x, car.y, car.width, car.height);
-                ctx.globalCompositeOperation = 'source-over'; // Reset
+                ctx.globalCompositeOperation = 'source-over'; 
             });
 
-            // Draw player car
             if (!gameOver) { 
                 if (playerCrashed) {
-                    // Flashing effect when crashed
                     if (Math.floor((Date.now() - crashTime) / 150) % 2 === 0) {
                         ctx.fillStyle = playerCar.fillColor;
                         ctx.fillRect(playerCar.x, playerCar.y, playerCar.width, playerCar.height);
@@ -632,19 +691,17 @@
                         ctx.strokeStyle = playerCar.lineColor;
                         ctx.lineWidth = 2;
                         ctx.strokeRect(playerCar.x, playerCar.y, playerCar.width, playerCar.height);
-                        // Red overlay for crash
                         ctx.fillStyle = "rgba(255, 100, 100, 0.3)"; 
                         ctx.fillRect(playerCar.x, playerCar.y, playerCar.width, playerCar.height);
                         ctx.globalCompositeOperation = 'source-over';
                     }
-                } else { // Normal player car drawing
+                } else { 
                     ctx.fillStyle = playerCar.fillColor;
                     ctx.fillRect(playerCar.x, playerCar.y, playerCar.width, playerCar.height);
                     ctx.globalCompositeOperation = 'lighter';
                     ctx.strokeStyle = playerCar.lineColor;
                     ctx.lineWidth = 2;
                     ctx.strokeRect(playerCar.x, playerCar.y, playerCar.width, playerCar.height);
-                    // Headlights effect
                     if (playerCar.speed > 0.1 && !playerCar.isEngineBraking) { 
                         ctx.fillStyle = COLOR_BRIGHTER_LINE; 
                         ctx.shadowColor = COLOR_BRIGHTER_LINE; 
@@ -657,9 +714,8 @@
                 }
             }
 
-            // Draw speedometer
             const speedoX = 20, speedoY = 35; 
-            ctx.font = "16px 'Press Start 2P'"; // Slightly smaller for portrait
+            ctx.font = "16px 'Press Start 2P'"; 
             ctx.textAlign = 'left';
             ctx.globalCompositeOperation = 'lighter'; 
             ctx.fillStyle = COLOR_SPEEDO_TEXT_GLOW;
@@ -669,18 +725,16 @@
             ctx.shadowBlur = 0; 
             ctx.globalCompositeOperation = 'source-over';
 
-            // Draw on-screen messages (e.g., time bonus)
-            const messageStartX = canvas.width - 15, messageStartY = 35, messageLineHeight = 22; // Adjusted line height
-            ctx.font = "12px 'Press Start 2P'"; // Smaller for portrait
+            const messageStartX = canvas.width - 15, messageStartY = 35, messageLineHeight = 22; 
+            ctx.font = "12px 'Press Start 2P'"; 
             ctx.textAlign = 'right';
             let visibleMessages = 0;
             for (let i = onScreenMessages.length - 1; i >= 0; i--) {
                 const msg = onScreenMessages[i];
-                // Remove old messages (unless it's a persistent crash message)
                 if (Date.now() > msg.endTime && msg.text !== "CRASH!" && !msg.text.startsWith("CRASH! -")) { 
                      if (Date.now() > msg.endTime) onScreenMessages.splice(i, 1);
                 } else {
-                    if (visibleMessages < 3) { // Show max 3 messages
+                    if (visibleMessages < 3) { 
                         ctx.globalCompositeOperation = 'lighter'; 
                         ctx.fillStyle = msg.color === COLOR_CRASH_MESSAGE_TEXT ? msg.color : COLOR_INFO_MESSAGE_GLOW;
                         ctx.shadowColor = msg.color === COLOR_CRASH_MESSAGE_TEXT ? msg.color : COLOR_INFO_MESSAGE_GLOW; 
@@ -694,66 +748,28 @@
             }
         }
 
-        // Draw the initial start screen
-        function drawStartScreen() { 
-            calculateRoadDimensions(); // Ensure road dimensions are set for start screen
-            ctx.fillStyle = COLOR_BACKGROUND_CTX;
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = COLOR_ROAD_CTX; 
-            ctx.fillRect(roadX, 0, roadWidth, canvas.height);
-            ctx.globalCompositeOperation = 'lighter';
-            ctx.fillStyle = COLOR_BRIGHT_LINE;
-            // Draw static lane markers for start screen
-            for (let y = 0; y < canvas.height; y += LANE_MARKER_HEIGHT + LANE_MARKER_GAP) {
-                ctx.fillRect(roadX + roadWidth / 3 - LANE_MARKER_WIDTH / 2, y, LANE_MARKER_WIDTH, LANE_MARKER_HEIGHT);
-                ctx.fillRect(roadX + (roadWidth * 2) / 3 - LANE_MARKER_WIDTH / 2, y, LANE_MARKER_WIDTH, LANE_MARKER_HEIGHT);
-            }
-            ctx.fillRect(roadX - 3, 0, 3, canvas.height); 
-            ctx.fillRect(roadX + roadWidth, 0, 3, canvas.height);
-            ctx.globalCompositeOperation = 'source-over';
 
-            // Draw text on start screen
-            ctx.font = "20px 'Press Start 2P'"; // Adjusted for portrait
-            ctx.textAlign = 'center'; 
-            ctx.globalCompositeOperation = 'lighter';
-            ctx.fillStyle = COLOR_BRIGHTER_LINE; 
-            ctx.shadowColor = COLOR_BRIGHTER_LINE; 
-            ctx.shadowBlur = 8;
-            ctx.fillText("Gemini Racer", canvas.width / 2, canvas.height / 2 - 100); // Adjusted Y
-            ctx.fillText("PRESS START", canvas.width / 2, canvas.height / 2 - 60); // Adjusted Y
-            ctx.shadowBlur = 0;
-            ctx.globalCompositeOperation = 'source-over';
-            ctx.font = "12px 'Press Start 2P'"; // Adjusted for portrait
-            ctx.fillStyle = COLOR_BRIGHT_LINE; 
-            ctx.fillText("Controls:", canvas.width / 2, canvas.height / 2 + 0); // Adjusted Y
-            ctx.fillText("Arrows: Steer", canvas.width / 2, canvas.height / 2 + 30); // Adjusted Y
-            ctx.fillText("Z: Accelerate", canvas.width / 2, canvas.height / 2 + 60); // Adjusted Y
-            ctx.fillText("X: Gear Shift", canvas.width / 2, canvas.height / 2 + 90); // Adjusted Y
-        }
-
-        // Draw game over screen
         function drawGameOver() { 
-            ctx.fillStyle = 'rgba(10, 20, 10, 0.75)'; // Semi-transparent overlay
+            ctx.fillStyle = 'rgba(10, 20, 10, 0.75)'; 
             ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.font = "24px 'Press Start 2P'"; // Adjusted for portrait
+            ctx.font = "24px 'Press Start 2P'"; 
             ctx.textAlign = 'center'; 
             const gameOverReason = messageText.textContent || "GAME OVER"; 
             ctx.globalCompositeOperation = 'lighter';
             ctx.fillStyle = COLOR_GAMEOVER_TEXT_GLOW; 
             ctx.shadowColor = COLOR_GAMEOVER_TEXT_GLOW; 
             ctx.shadowBlur = 10;
-            ctx.fillText(gameOverReason, canvas.width / 2, canvas.height / 2 - 60); // Adjusted Y
-            ctx.font = "18px 'Press Start 2P'"; // Adjusted for portrait
+            ctx.fillText(gameOverReason, canvas.width / 2, canvas.height / 2 - 60); 
+            ctx.font = "18px 'Press Start 2P'"; 
             ctx.fillStyle = COLOR_BRIGHTER_LINE;
             ctx.shadowColor = COLOR_BRIGHTER_LINE;
             ctx.shadowBlur = 5; 
-            ctx.fillText("Final Score: " + score, canvas.width / 2, canvas.height / 2 - 10); // Adjusted Y
-            ctx.fillText("Press RESTART", canvas.width / 2, canvas.height / 2 + 30); // Adjusted Y
+            ctx.fillText("Final Score: " + score, canvas.width / 2, canvas.height / 2 - 10); 
+            ctx.fillText("Press RESTART", canvas.width / 2, canvas.height / 2 + 30); 
             ctx.shadowBlur = 0;
             ctx.globalCompositeOperation = 'source-over';
         }
 
-        // End the game
         function endGame(reason) { 
             if (gameOver) return; 
             gameOver = true; 
@@ -761,44 +777,53 @@
             playerCar.speed = 0; 
             playerCar.kmh = 0;
             if(timerInterval) clearInterval(timerInterval);
-            messageText.textContent = reason; // Set reason for game over message overlay
-            // messageOverlay.style.display = 'block'; // Show overlay (or rely on drawGameOver)
-            // closeMessageButton.style.display = 'block'; // Show close button for overlay
+            messageText.textContent = reason; 
+            
             resetButton.style.display = 'inline-block'; 
             startButton.style.display = 'none';
-            // No longer show critical message overlay here, drawGameOver handles it
+
+            clearTimeout(gameOverReturnToStartTimerId); 
+            gameOverReturnToStartTimerId = setTimeout(() => {
+                if (gameOver) { 
+                    gameOver = false; 
+                    playerCrashed = false;
+                    keys = {};
+                    
+                    messageText.textContent = ''; 
+                    hideMessage('critical');      
+
+                    resetButton.style.display = 'none';
+                    startButton.style.display = 'inline-block';
+
+                    calculateRoadDimensions(); 
+                    initializeDemoCars();      
+                    startScreenDemoLoop();     
+                }
+            }, 5000); 
         }
 
-        // Show on-screen messages (not the main overlay)
         function showMessage(text, duration = 2000, type = 'info', color) {
             let messageColor;
-            if (type === 'info') { // For short informational messages on canvas
+            if (type === 'info') { 
                 messageColor = color || COLOR_INFO_MESSAGE_GLOW; 
                 onScreenMessages.unshift({ text: text, endTime: Date.now() + duration, color: messageColor });
-                if (onScreenMessages.length > 3) onScreenMessages.pop(); // Keep only last 3
-            } else if (type === 'critical') { // For main overlay messages (like initial crash)
-                messageText.textContent = text; // Set text for the HTML overlay
-                // messageOverlay.style.display = 'block'; // Show the HTML overlay
-                // if (duration > 0) { // Auto-hide critical message if duration is set
-                //     setTimeout(() => hideMessage('critical'), duration);
-                // }
+                if (onScreenMessages.length > 3) onScreenMessages.pop(); 
+            } else if (type === 'critical') { 
+                messageText.textContent = text; 
             }
         }
         
-        // Hide the main message overlay
         function hideMessage(type = 'critical') { 
             if (type === 'critical') {
                 messageOverlay.style.display = 'none';
             }
         }
 
-        // Event listeners for keyboard input
         window.addEventListener('keydown', (e) => { 
-            if (gameOver && e.key.toLowerCase() !== 'r') return; // Allow restart even if game over
+            if (gameOver && e.key.toLowerCase() !== 'r') return; 
             const key = e.key.toLowerCase(); 
             keys[key] = true; 
             if (key === 'x') toggleGear();
-            // Prevent default browser action for game keys
             if (["arrowup", "arrowdown", "arrowleft", "arrowright", " ", "z", "x"].includes(key)) {
                 e.preventDefault();
             }
@@ -807,17 +832,15 @@
             keys[e.key.toLowerCase()] = false; 
         });
 
-        // Event listeners for buttons
         startButton.addEventListener('click', () => { 
             if (!gameRunning && !gameOver) initGame(); 
         });
         resetButton.addEventListener('click', initGame ); 
-        // closeMessageButton.addEventListener('click', () => hideMessage('critical'));
 
-        // Initial setup on window load
         window.onload = () => {
-            calculateRoadDimensions(); // Calculate initial road dimensions
-            drawStartScreen(); // Draw the start screen
+            calculateRoadDimensions(); 
+            initializeDemoCars();    
+            startScreenDemoLoop();   
         };
     </script>
 </body>
