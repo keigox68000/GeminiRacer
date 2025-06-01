@@ -1,9 +1,9 @@
 # Gemini Racer
+<img src="gr.gif" alt="Gemini Racer screenshot" width="250"> 
 
 ## 公開ページ
-
 [https://YOUR_USERNAME.github.io/GeminiRacer/](https://YOUR_USERNAME.github.io/GeminiRacer/) 
-<img src="gr.gif" alt="Gemini Racer screenshot" width="250"> 
+
 ## これはなに？
 
 ライバル車が走るハイウェイを駆け抜ける、レトロスタイルの縦スクロールレーシングゲームです。
