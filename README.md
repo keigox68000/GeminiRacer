@@ -2,7 +2,7 @@
 <img src="gr.gif" alt="Gemini Racer screenshot" width="250"> 
 
 ## 公開ページ
-[https://keigox68000.github.io/GeminiRacer/](https://YOUR_USERNAME.github.io/GeminiRacer/) 
+[https://keigox68000.github.io/GeminiRacer/](https://keigox68000.github.io/GeminiRacer/) 
 
 ## これはなに？
 
